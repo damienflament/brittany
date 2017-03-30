@@ -33,6 +33,7 @@ import           Language.Haskell.Brittany.Internal.LayouterBasics
 
 import           Language.Haskell.Brittany.Internal.Layouters.Type
 import           Language.Haskell.Brittany.Internal.Layouters.Decl
+import           Language.Haskell.Brittany.Internal.Layouters.DataDecl
 import           Language.Haskell.Brittany.Internal.Utils
 import           Language.Haskell.Brittany.Internal.Backend
 import           Language.Haskell.Brittany.Internal.BackendUtils
@@ -47,8 +48,7 @@ import           Language.Haskell.Brittany.Internal.Transformations.Indent
 import qualified GHC as GHC hiding (parseModule)
 import           ApiAnnotation ( AnnKeywordId(..) )
 import           RdrName ( RdrName(..) )
-import           GHC ( runGhc, GenLocated(L), moduleNameString )
-import           SrcLoc ( SrcSpan )
+import           GHC ( Located, runGhc, GenLocated(L), moduleNameString )
 import           HsSyn
 import qualified DynFlags as GHC
 import qualified GHC.LanguageExtensions.Type as GHC
@@ -235,7 +235,7 @@ parsePrintModuleTests conf filename input = do
 --           Left $ "pretty printing error(s):\n" ++ List.unlines errStrs
 --         else return $ TextL.toStrict $ Text.Builder.toLazyText out
 
-ppModule :: GenLocated SrcSpan (HsModule RdrName) -> PPM ()
+ppModule :: Located (HsModule RdrName) -> PPM ()
 ppModule lmod@(L loc m@(HsModule _name _exports _imports decls _ _)) = do
   let emptyModule = L loc m { hsmodDecls = [] }
   (anns', post) <- do
@@ -314,6 +314,9 @@ ppDecl d@(L loc decl) = case decl of
       case eitherNode of
         Left  ns -> docLines $ return <$> ns
         Right n -> return n
+    layoutBriDoc d briDoc
+  TyClD (DataDecl name vars def _ _) -> withTransformedAnns d $ do
+    briDoc <- briDocMToPPM $ layoutDataDecl d name vars def
     layoutBriDoc d briDoc
   _         -> briDocMToPPM (briDocByExactNoComment d) >>= layoutBriDoc d
 
