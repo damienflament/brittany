@@ -13,6 +13,7 @@ where
 #include "prelude.inc"
 
 import qualified Language.Haskell.GHC.ExactPrint as ExactPrint
+import qualified Language.Haskell.GHC.ExactPrint.Types as ExactPrint.Types
 
 import qualified Data.Text.Lazy.Builder as Text.Builder
 
@@ -28,8 +29,14 @@ import           Data.Generics.Uniplate.Direct as Uniplate
 
 
 
+data InlineConfig = InlineConfig
+  { _icd_perModule :: CConfig Option
+  , _icd_perBinding :: Map String (CConfig Option)
+  , _icd_perKey :: Map ExactPrint.Types.AnnKey (CConfig Option)
+  }
+
 type PPM = MultiRWSS.MultiRWS
-  '[Map ExactPrint.AnnKey ExactPrint.Anns, Config, ExactPrint.Anns]
+  '[Map ExactPrint.AnnKey ExactPrint.Anns, InlineConfig, Config, ExactPrint.Anns]
   '[Text.Builder.Builder, [BrittanyError], Seq String]
   '[]
 
@@ -119,6 +126,9 @@ data BrittanyError
     -- ^ parsing failed
   | ErrorUnusedComment String
     -- ^ internal error: some comment went missing
+  | ErrorMacroConfig String String
+    -- ^ in-source config string parsing error; first argument is the parser
+    --   output and second the corresponding, ill-formed input.
   | LayoutWarning String
     -- ^ some warning
   | forall ast . Data.Data.Data ast => ErrorUnknownNode String ast

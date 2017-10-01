@@ -181,9 +181,11 @@ coreIO putErrorLnIO config suppressOutput inputPathM outputPathM = EitherT.runEi
   -- CPP (but requires the input to be a file..).
   let cppMode            = config & _conf_preprocessor & _ppconf_CPPMode & confUnpack
   -- the flag will do the following: insert a marker string
-  -- ("-- BRITTANY_INCLUDE_HACK ") right before any lines starting with
+  -- ("-- BRITANY_INCLUDE_HACK ") right before any lines starting with
   -- "#include" before processing (parsing) input; and remove that marker
   -- string from the transformation output.
+  -- The flag is intentionally misspelled to prevent clashing with
+  -- inline-config stuff.
   let hackAroundIncludes = config & _conf_preprocessor & _ppconf_hackAroundIncludes & confUnpack
   let exactprintOnly     = config & _conf_debug & _dconf_roundtrip_exactprint_only & confUnpack
   let cppCheckFunc dynFlags = if GHC.xopt GHC.Cpp dynFlags
@@ -202,7 +204,7 @@ coreIO putErrorLnIO config suppressOutput inputPathM outputPathM = EitherT.runEi
   parseResult <- case inputPathM of
     Nothing -> do
       -- TODO: refactor this hack to not be mixed into parsing logic
-      let hackF s = if "#include" `isPrefixOf` s then "-- BRITTANY_INCLUDE_HACK " ++ s else s
+      let hackF s = if "#include" `isPrefixOf` s then "-- BRITANY_INCLUDE_HACK " ++ s else s
       let hackTransform =
             if hackAroundIncludes && not exactprintOnly then List.intercalate "\n" . fmap hackF . lines' else id
       inputString <- liftIO $ System.IO.hGetContents System.IO.stdin
@@ -214,6 +216,14 @@ coreIO putErrorLnIO config suppressOutput inputPathM outputPathM = EitherT.runEi
       putErrorLn $ show left
       EitherT.left 60
     Right (anns, parsedSource, hasCPP) -> do
+      inlineConf <- case extractCommentConfigs anns of
+        Left (err, input) -> do
+          putErrorLn
+            $  "Error: parse error in inline configuration:"
+          putErrorLn err
+          putErrorLn $ "  in the string \"" ++ input ++ "\"."
+          EitherT.left 61
+        Right c -> pure c
       when (config & _conf_debug .> _dconf_dump_ast_full .> confUnpack) $ do
         let val = printTreeWithCustom 100 (customLayouterF anns) parsedSource
         trace ("---- ast ----\n" ++ show val) $ return ()
@@ -224,9 +234,9 @@ coreIO putErrorLnIO config suppressOutput inputPathM outputPathM = EitherT.runEi
           else do
             let omitCheck = config & _conf_errorHandling .> _econf_omit_output_valid_check .> confUnpack
             (ews, outRaw) <- if hasCPP || omitCheck
-              then return $ pPrintModule config anns parsedSource
-              else liftIO $ pPrintModuleAndCheck config anns parsedSource
-            let hackF s = fromMaybe s $ TextL.stripPrefix (TextL.pack "-- BRITTANY_INCLUDE_HACK ") s
+              then return $ pPrintModule config inlineConf anns parsedSource
+              else liftIO $ pPrintModuleAndCheck config inlineConf anns parsedSource
+            let hackF s = fromMaybe s $ TextL.stripPrefix (TextL.pack "-- BRITANY_INCLUDE_HACK ") s
             pure $ if hackAroundIncludes
               then (ews, TextL.intercalate (TextL.pack "\n") $ fmap hackF $ TextL.splitOn (TextL.pack "\n") outRaw)
               else (ews, outRaw)
@@ -235,6 +245,7 @@ coreIO putErrorLnIO config suppressOutput inputPathM outputPathM = EitherT.runEi
           customErrOrder ErrorOutputCheck{}   = 1
           customErrOrder ErrorUnusedComment{} = 2
           customErrOrder ErrorUnknownNode{}   = 3
+          customErrOrder ErrorMacroConfig{}   = 5
       when (not $ null errsWarns) $ do
         let groupedErrsWarns = Data.List.Extra.groupOn customErrOrder $ List.sortOn customErrOrder $ errsWarns
         groupedErrsWarns `forM_` \case
@@ -265,6 +276,11 @@ coreIO putErrorLnIO config suppressOutput inputPathM outputPathM = EitherT.runEi
             unused `forM_` \case
               ErrorUnusedComment str -> putErrorLn str
               _                      -> error "cannot happen (TM)"
+          (ErrorMacroConfig err input:_) -> do
+            putErrorLn
+              $  "Error: parse error in inline configuration:"
+            putErrorLn err
+            putErrorLn $ "  in the string \"" ++ input ++ "\"."
           [] -> error "cannot happen"
       -- TODO: don't output anything when there are errors unless user
       -- adds some override?
